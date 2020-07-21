@@ -8,13 +8,15 @@ import matplotlib.pyplot as plt
 
 from dataloader import SiceDataset
 
+import time
+
 def loss_spa(I, Y, region_size):
     """ Calculate the spatial consistency loss over the entire training set.
 
     Parameters
     ----------
-    I: input tensor of shape (m, 3, 256, 256) containing a batch of the training data
-    Y: input tensor of shape (m, 3, 256, 256) containing the corresponding batch of the processed data
+    I: input tensor of shape (m, 3, I.shape[2], I.shape[2]) containing a batch of the training data
+    Y: input tensor of shape (m, 3, I.shape[2], I.shape[2]) containing the corresponding batch of the processed data
     region_size: size of local regions to operate on
 
     Output
@@ -26,14 +28,16 @@ def loss_spa(I, Y, region_size):
     I_averaged = torch.mean(I, dim=1, keepdim=True)
     Y_averaged = torch.mean(Y, dim=1, keepdim=True)
     
-    assert I_averaged.shape == (I.shape[0], 1, 256, 256)
-    assert Y_averaged.shape == (Y.shape[0], 1, 256, 256)
+    assert I_averaged.shape == (I.shape[0], 1, I.shape[2], I.shape[2])
+    assert Y_averaged.shape == (Y.shape[0], 1, I.shape[2], I.shape[2])
+
+    I_averaged = torch.transpose(I_averaged, 2, 3)
+    Y_averaged = torch.transpose(Y_averaged, 2, 3)
 
     # extract image regions
     I_regions = f.unfold(I_averaged, kernel_size=region_size, stride=region_size)
     Y_regions = f.unfold(Y_averaged, kernel_size=region_size, stride=region_size)
-
-    num_regions_sqrt = 256 // region_size
+    num_regions_sqrt = I.shape[2] // region_size
     
     assert I_regions.shape == (I.shape[0], 1 * region_size ** 2, num_regions_sqrt ** 2)
     assert Y_regions.shape == (Y.shape[0], 1 * region_size ** 2, num_regions_sqrt ** 2)
@@ -45,29 +49,30 @@ def loss_spa(I, Y, region_size):
     assert I_regions_averaged.shape == (I.shape[0], 1, num_regions_sqrt ** 2)
     assert Y_regions_averaged.shape == (Y.shape[0], 1, num_regions_sqrt ** 2)
 
-    I_regions_up = torch.roll(I_regions_averaged, shifts=1, dims=1)
-    Y_regions_up = torch.roll(Y_regions_averaged, shifts=1, dims=1)
-
+    I_regions_up = torch.roll(I_regions_averaged, shifts=1, dims=2)
+    Y_regions_up = torch.roll(Y_regions_averaged, shifts=1, dims=2)
+  
+   
     # handle border regions
     I_regions_up[:,:,0:num_regions_sqrt**2:num_regions_sqrt] = 0
     Y_regions_up[:,:,0:num_regions_sqrt**2:num_regions_sqrt] = 0
-
-    I_regions_down = torch.roll(I_regions_averaged, shifts=-1, dims=1)
-    Y_regions_down = torch.roll(Y_regions_averaged, shifts=-1, dims=1)
+    
+    I_regions_down = torch.roll(I_regions_averaged, shifts=-1, dims=2)
+    Y_regions_down = torch.roll(Y_regions_averaged, shifts=-1, dims=2)
 
      # handle border regions
     I_regions_down[:,:,num_regions_sqrt-1:num_regions_sqrt**2:num_regions_sqrt] = 0
     Y_regions_down[:,:,num_regions_sqrt-1:num_regions_sqrt**2:num_regions_sqrt] = 0
 
-    I_regions_left = torch.roll(I_regions_averaged, shifts=3, dims=1)
-    Y_regions_left = torch.roll(Y_regions_averaged, shifts=3, dims=1)
+    I_regions_left = torch.roll(I_regions_averaged, shifts=num_regions_sqrt, dims=2)
+    Y_regions_left = torch.roll(Y_regions_averaged, shifts=num_regions_sqrt, dims=2)
 
     # handle border regions
     I_regions_left[:,:,0:num_regions_sqrt] = 0
     Y_regions_left[:,:,0:num_regions_sqrt] = 0
 
-    I_regions_right = torch.roll(I_regions_averaged, shifts=-3, dims=1)
-    Y_regions_right = torch.roll(Y_regions_averaged, shifts=-3, dims=1)
+    I_regions_right = torch.roll(I_regions_averaged, shifts=-num_regions_sqrt, dims=2)
+    Y_regions_right = torch.roll(Y_regions_averaged, shifts=-num_regions_sqrt, dims=2)
 
     # handle border regions
     I_regions_right = torch.flip(I_regions_right, dims=(1,2))
@@ -77,14 +82,14 @@ def loss_spa(I, Y, region_size):
     Y_regions_right = torch.flip(Y_regions_right, dims=(1,2))
     Y_regions_right[:,:,0:num_regions_sqrt] = 0
     Y_regions_right = torch.flip(Y_regions_right, dims=(1,2))
-    
+   
     # compute absolute differences in intensities
     I_abs_diff_up = torch.abs(I_regions_averaged - I_regions_up)
     Y_abs_diff_up = torch.abs(Y_regions_averaged - Y_regions_up)
-
+    
     I_abs_diff_down = torch.abs(I_regions_averaged - I_regions_down)
     Y_abs_diff_down = torch.abs(Y_regions_averaged - Y_regions_down)
-
+    
     I_abs_diff_left = torch.abs(I_regions_averaged - I_regions_left)
     Y_abs_diff_left = torch.abs(Y_regions_averaged - Y_regions_left)
 
@@ -102,6 +107,7 @@ def loss_spa(I, Y, region_size):
     return loss
 
 def _loss_spa(I, Y, region_size):
+
     loss = 0.0
 
     I = torch.mean(I, dim=1, keepdim=True)
@@ -156,12 +162,13 @@ if __name__ == "__main__":
     dataset = SiceDataset("/home/amrmustafa/vault/Zero-DCE/Dataset_Part1/[0-9]*/") 
     train_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=1,
+            batch_size=64,
             shuffle=True,
             num_workers=0
         )
 
     first_batch = next(iter(train_loader))
+    second_batch = next(iter(train_loader))
     
     ## visualize a single training batch
     grid = torchvision.utils.make_grid(first_batch, nrow=2)
@@ -169,17 +176,18 @@ if __name__ == "__main__":
     #plt.imshow(np.transpose(grid, (1,2,0)))
     #plt.show()
 
-    second_batch = next(iter(train_loader))
+    start_time = time.time()
+    _loss_spa(first_batch, second_batch, 64)
+    print("--- %s seconds ---" % (time.time() - start_time))
 
-    ## visualize a single training batch
-    grid = torchvision.utils.make_grid(second_batch, nrow=2)
-    plt.figure(figsize=(50, 50))
-    #plt.imshow(np.transpose(grid, (1,2,0)))
-    #plt.show()
+    start_time = time.time()
+    loss_spa(first_batch, second_batch, 64)
+    print("--- %s seconds ---" % (time.time() - start_time))
 
-    print(first_batch.size())
-    batch = torch.ones([1, 3, 256, 256])
-    _loss_spa(batch, 2*batch, 1)
-    loss_spa(batch, 2*batch, 1)
+
+
+
+
+    
 
 
