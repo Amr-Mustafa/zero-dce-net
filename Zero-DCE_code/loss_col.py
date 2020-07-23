@@ -25,7 +25,6 @@ def loss_col(Y):
     returns the color constancy loss """
 
     Y_averaged = torch.mean(Y, dim=[2, 3])
-    print(Y_averaged)
     return (Y_averaged[:, 0] - Y_averaged[:, 1]) ** 2 + \
             (Y_averaged[:, 0] - Y_averaged[:, 2]) ** 2 + \
             (Y_averaged[:, 1] - Y_averaged[:, 2]) ** 2 
